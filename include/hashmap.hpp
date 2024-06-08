@@ -15,12 +15,17 @@
 
 template <typename T> struct is_hashable
 {
-    static const bool value = false;
+    static constexpr bool value = false;
 
     static size_t hash(T const &)
     {
-        std::runtime_error("not hashable");
+        throw std::runtime_error("not hashable");
     }
+};
+
+template <typename T> struct is_trivially_equatable
+{
+    static constexpr bool value = false;
 };
 
 static_assert(std::numeric_limits<size_t>::digits == 64);
@@ -30,17 +35,22 @@ size_t byteshl(size_t n)
     return (n << 8) | ((n >> 56) & 0xff);
 }
 
-#define IMPL_HASHABLE_FOR_INTEGRAL(T)   \
-    template <> struct is_hashable<T>   \
-    {                                   \
-        static const bool value = true; \
-                                        \
-        static size_t hash(T const &nt) \
-        {                               \
-            size_t n = nt;              \
-            return n;                   \
-        }                               \
-    };
+#define IMPL_HASHABLE_FOR_INTEGRAL(T)            \
+    template <> struct is_hashable<T>            \
+    {                                            \
+        static constexpr bool value = true;      \
+                                                 \
+        static size_t hash(T const &nt)          \
+        {                                        \
+            size_t n = nt;                       \
+            return n;                            \
+        }                                        \
+    };                                           \
+                                                 \
+    template <> struct is_trivially_equatable<T> \
+    {                                            \
+        static constexpr bool value = true;      \
+    }
 
 IMPL_HASHABLE_FOR_INTEGRAL(char);
 IMPL_HASHABLE_FOR_INTEGRAL(unsigned char);
@@ -53,7 +63,7 @@ IMPL_HASHABLE_FOR_INTEGRAL(unsigned long);
 
 template <> struct is_hashable<std::string>
 {
-    static const bool value = true;
+    static constexpr bool value = true;
 
     static size_t hash(std::string const &str)
     {
@@ -88,7 +98,9 @@ typedef movemask_t<ctrlchunk_t>::type ctrlmask_t;
      */
 struct alignas(alignof(ctrlchunk_t)) CtrlChunk
 {
-    static const size_t NR_BYTES = sizeof(ctrlchunk_t);
+    static constexpr size_t NR_BYTES = sizeof(ctrlchunk_t);
+    static_assert(sizeof(ctrlchunk_t) == alignof(ctrlchunk_t));
+    // Thus sizeof(ctrlchunk_t) is a power of 2
 
     static constexpr char CTRL_EMPTY = -1;
     static constexpr char CTRL_DEL = -2;
@@ -100,13 +112,18 @@ struct alignas(alignof(ctrlchunk_t)) CtrlChunk
         memset(bytes, 0, NR_BYTES);
     }
 
+    CtrlChunk(CtrlChunk const &rhs)
+    {
+        *(ctrlchunk_t *)this = rhs.as_simd();
+    }
+
     CtrlChunk &operator=(CtrlChunk const &rhs)
     {
-        memcpy(this, &rhs, sizeof(CtrlChunk));
+        *(ctrlchunk_t *)this = rhs.as_simd();
         return *this;
     }
 
-    inline ctrlchunk_t as_simd()
+    inline ctrlchunk_t as_simd() const
     {
         return *(ctrlchunk_t *)(this);
     }
@@ -130,7 +147,7 @@ struct alignas(alignof(ctrlchunk_t)) CtrlChunk
      *   information to prove that `b` exists nowhere in the map. `offset` is
      *   not written to.
      * - `CTRL_FIND_NOTHING` if `b` exists nowhere in this map. `offset` is set
-     *   to the index of the first subsequent empty cell
+     *   to the index of the first subsequent empty slot
      */
     uint32_t find(char b, uint32_t start, uint32_t &offset)
     {
@@ -152,7 +169,7 @@ struct alignas(alignof(ctrlchunk_t)) CtrlChunk
     /**
      * Find the first free byte, returning its offset from the start of this 
      * byte. Ignore the first `start` bytes. Returns `NR_BYTES` if there are no
-     * empty cells.
+     * empty slots.
      */
     uint32_t find_empty(uint32_t start)
     {
@@ -189,35 +206,80 @@ private:
     | entries   |
     +-----------+
     */
-    FlatBuf buf;
+    uint8_t *buf;
     size_t max_nr_entries;
     /** used to calculate load factor */
     size_t nr_used;
 
     static const size_t BUF_ALIGNMENT = alignof(ctrlchunk_t);
 
+    char h7(size_t hash)
+    {
+        return (char)(hash & 0b1111111);
+    }
+
+    bool cmp_keys(size_t hash, Key const &key, size_t other_hash, Key const &other_key)
+    {
+        // should just optimize away
+        if (is_trivially_equatable<Key>::value) {
+            return hash == other_hash && key == other_key;
+        } else {
+            return key == other_key;
+        }
+    }
+
 public:
     struct Entry
     {
-        uint64_t hash;
+        size_t hash;
         Key key;
         Val val;
 
-        Entry(Key key, Val val)
-            : key(key)
-            , val(val)
+        Entry()
+            : hash()
+            , key()
+            , val()
         {
-            hash = is_hashable<Key>::hash(key);
         }
 
-        char h7()
+        Entry(size_t hash, Key key, Val val)
+            : hash(hash)
+            , key(std::move(key))
+            , val(std::move(val))
         {
-            return (char)(hash & 0b1111111);
         }
+
+        Entry(const Entry &other) = delete;
+
+        Entry &operator=(const Entry &other) = delete;
+        // {
+        //     if (this != &other) {
+        //         this.hash = other.hash;
+        //         this.key = other.key;
+        //         this.val = other.val;
+        //     }
+        // }
+
+        Entry(Entry &&other) noexcept
+            : hash(other.hash)
+            , key(std::move(other.key))
+            , val(std::move(other.val))
+        {
+        }
+
+        Entry &operator=(Entry &&other) noexcept
+        {
+            hash = other.hash;
+            key = std::move(other.key);
+            val = std::move(other.val);
+            return *this;
+        }
+
+        ~Entry() = default;
     };
 
     HashTbl()
-        : buf(FlatBuf())
+        : buf(nullptr)
         , nr_used(0)
     {
     }
@@ -225,13 +287,19 @@ public:
     static Self with_capacity(size_t capacity)
     {
         auto self = Self();
-        self.buf.grow(Layout(0, 0), Layout(capacity, BUF_ALIGNMENT));
+        // alignup
+        self.max_nr_entries = (capacity / CtrlChunk::NR_BYTES + 1) * CtrlChunk::NR_BYTES;
+        std::cout << "alloc buf size = " << self.buf_size() << std::endl;
+        if (posix_memalign((void **)&self.buf, BUF_ALIGNMENT, self.buf_size())) {
+            throw std::runtime_error("OOM");
+        }
+        memset(self.buf, CtrlChunk::CTRL_EMPTY, self.max_nr_entries);
         return self;
     }
 
     ~HashTbl()
     {
-        buf.dealloc();
+        if (buf) free(buf);
     }
 
     HashTbl(HashTbl &)
@@ -254,14 +322,14 @@ public:
         throw std::runtime_error("Not yet implemented!");
     }
 
-    static inline size_t ctrlchunk_buf_size()
+    size_t ctrlchunk_buf_size()
     {
         // We need to make this assumption for our calculation to make sense --
         // that the byte directly after our ctrl chunks is ctrlchunk_t-aligned.
-        static_assert(alignof(ctrlchunk_t) == sizeof(ctrlchunk_t));
+        // alignof(ctrlchunk_t) == sizeof(ctrlchunk_t)
         size_t padding_sz =
             alignof(ctrlchunk_t) > alignof(Entry) ? 0 : alignof(Entry) - alignof(ctrlchunk_t);
-        return sizeof(ctrlchunk_t) + padding_sz;
+        return sizeof(ctrlchunk_t) * max_nr_entries + padding_sz;
     }
 
     size_t buf_size()
@@ -271,15 +339,17 @@ public:
 
     void grow()
     {
-        Self new_tbl;
-        new_tbl.buf.grow(Layout(0, 0), Layout(buf_size() * 2, BUF_ALIGNMENT));
-        new_tbl.max_nr_entries = max_nr_entries * 2;
         throw std::runtime_error("not yet implemented");
     }
 
-    CtrlChunk *ctrlchunks()
+    CtrlChunk *ctrlchunks_buf()
     {
-        return (CtrlChunk *)buf.data;
+        return (CtrlChunk *)buf;
+    }
+
+    Entry *entries_buf()
+    {
+        return (Entry *)(buf + ctrlchunk_buf_size());
     }
 
     void insert_unchecked(size_t idx, Entry e)
@@ -288,48 +358,114 @@ public:
     }
 
     /**
-     * Insert, without checkign the ctrl bytes first, just go straight to idx 
-     * and start 
+     * Get the slot where we can insert something with the provided `key`. 
+     * 
+     * # Returns
+     * - `true` if the slot is empty
+     * - `false` if it is occupied
      */
-    void insert_first_available(size_t idx, Entry e)
+    bool get_slot(size_t h, Key const &key, Entry *&slot, char *&ctrl_slot)
     {
-        throw std::runtime_error("nye");
+        if (max_nr_entries == 0) grow();
+
+        Entry *entries = entries_buf();
+        CtrlChunk *ctrlchunks = ctrlchunks_buf();
+
+        // Just memoize some stuff for readability mostly
+        size_t max_nr_ctrlchunks = max_nr_entries / CtrlChunk::NR_BYTES;
+        size_t entry_idx = h % max_nr_entries;
+        uint32_t ctrlchunk_idx = entry_idx / CtrlChunk::NR_BYTES;
+        uint32_t ctrlbyte_offset = entry_idx % CtrlChunk::NR_BYTES;
+        std::cout << "entry_idx = " << entry_idx << std::endl;
+
+        CtrlChunk ctrlchunk = *(ctrlchunks + ctrlchunk_idx);
+        ctrlmask_t keep_mask = std::numeric_limits<ctrlmask_t>::max() << ctrlbyte_offset;
+        ctrlmask_t hit_mask = simd<ctrlchunk_t>::movemask_eq(ctrlchunk.as_simd(), h7(h)) &
+                              keep_mask;
+        ctrlmask_t empty_mask =
+            simd<ctrlchunk_t>::movemask_eq(ctrlchunk.as_simd(), CtrlChunk::CTRL_EMPTY) & keep_mask;
+        while (true) {
+            char the_bin;
+            std::cin >> the_bin;
+            std::cout << "keep_mask  = " << std::bitset<16>(keep_mask) << std::endl;
+            std::cout << "hit_mask   = " << std::bitset<16>(hit_mask) << std::endl;
+            std::cout << "empty_mask = " << std::bitset<16>(empty_mask) << std::endl;
+            std::cout << "ctrlchunk_idx = " << ctrlchunk_idx << std::endl;
+            std::cout << "ctrlbyte_offset = " << ctrlbyte_offset << std::endl;
+
+            // ctz appears to be faster than alternative methods TODO: test
+            uint32_t empty_mask_tz = __builtin_ctz(empty_mask);
+            if (!hit_mask || empty_mask_tz < __builtin_ctz(hit_mask)) {
+                // If we have no matches, but there is an empty slot, we just
+                // put it there
+                if (empty_mask) {
+                    ctrlbyte_offset = empty_mask_tz;
+                    std::cout << "found empty slot at "
+                              << (ctrlchunk_idx * CtrlChunk::NR_BYTES + ctrlbyte_offset)
+                              << std::endl;
+                    size_t i = ctrlchunk_idx * CtrlChunk::NR_BYTES + ctrlbyte_offset;
+                    slot = entries + i;
+                    ctrl_slot = (char *)ctrlchunks_buf() + i;
+                    return true;
+                }
+                // If we have no matches and there is no empty slot, we must
+                // continue probing in subsequent chunks
+                ctrlchunk_idx = (ctrlchunk_idx + 1) % max_nr_ctrlchunks;
+                ctrlchunk = ctrlchunks[ctrlchunk_idx];
+                hit_mask = simd<ctrlchunk_t>::movemask_eq(ctrlchunk.as_simd(), h7(h));
+                empty_mask =
+                    simd<ctrlchunk_t>::movemask_eq(ctrlchunk.as_simd(), CtrlChunk::CTRL_EMPTY);
+                continue;
+            }
+            // We have some kind of hit that we need to check is a complete hit
+            ctrlbyte_offset = __builtin_ctz(hit_mask);
+            size_t i = ctrlchunk_idx * CtrlChunk::NR_BYTES + ctrlbyte_offset;
+            Entry *entry = entries + i;
+            if (cmp_keys(h, key, entry->hash, entry->key)) {
+                slot = entries + i;
+                ctrl_slot = (char *)ctrlchunks_buf() + i;
+                return false;
+            }
+            hit_mask &= ~((ctrlmask_t)1 << ctrlbyte_offset);
+        }
     }
 
     /**
      * Insert a key-value pair into the hash-table, overriding an existing value
-     * if there is one.
+     * if there is one. 
+     * 
+     * # Returns
+     * A pointer to the value
      */
-    void insert(Key key, Val val)
+    Val *insert(Key key, Val val)
     {
-        Entry e = Entry(std::move(key), std::move(val));
-        size_t idx = e.hash % max_nr_entries;
-        uint32_t skip = idx % CtrlChunk::NR_BYTES;
-        size_t ctrlchunk_idx = idx / CtrlChunk::NR_BYTES;
-        while (true) {
-            uint32_t offset;
-            switch ((ctrlchunks() + ctrlchunk_idx)->find(e.h7(), skip, offset)) {
-            case CtrlChunk::CTRL_FIND_FOUND:
-                insert_first_available(ctrlchunk_idx * CtrlChunk::NR_BYTES + offset, std::move(e));
-                return;
-            case CtrlChunk::CTRL_FIND_NOTHING:
-                insert_unchecked(ctrlchunk_idx * CtrlChunk::NR_BYTES + offset, std::move(e));
-                return;
-            case CtrlChunk::CTRL_FIND_MAYBE:
-                ctrlchunk_idx = (ctrlchunk_idx + 1) % max_nr_entries;
-                skip = 0;
-                break;
-            };
-        }
-        throw std::runtime_error("Not yet implemented!");
+        size_t h = is_hashable<Key>::hash(key);
+        Entry *slot;
+        char *ctrl_slot;
+        get_slot(h, key, slot, ctrl_slot);
+
+        new (slot) Entry(h, key, val);
+        *ctrl_slot = h7(h);
+
+        return &(slot->val);
     }
 
     /**
      * Get a pointer to the value at this key, or `nullptr` if it does not 
      * exist.
      */
-    Val *get(Key const &)
+    Val *get(Key const &key)
     {
-        throw std::runtime_error("Not yet implemented!");
+        size_t h = is_hashable<Key>::hash(key);
+        Entry *slot;
+        char *ctrl_slot;
+        bool empty = get_slot(h, key, slot, ctrl_slot);
+        
+        if (empty) return nullptr;
+        return &slot->val;
     }
 };
+
+//
+// std::cout << "buf = " << (void *)buf << ", buf size = " << buf_size() << std::endl;
+// std::cout << (void *)slot << std::endl;
