@@ -282,6 +282,7 @@ public:
         : buf(nullptr)
         , nr_used(0)
     {
+        *this = std::move(Self::with_capacity(16 * 12));
     }
 
     static Self with_capacity(size_t capacity)
@@ -289,7 +290,6 @@ public:
         auto self = Self();
         // alignup
         self.max_nr_entries = (capacity / CtrlChunk::NR_BYTES + 1) * CtrlChunk::NR_BYTES;
-        std::cout << "alloc buf size = " << self.buf_size() << std::endl;
         if (posix_memalign((void **)&self.buf, BUF_ALIGNMENT, self.buf_size())) {
             throw std::runtime_error("OOM");
         }
@@ -307,9 +307,9 @@ public:
         throw std::runtime_error("Not yet implemented!");
     }
 
-    HashTbl &operator=(HashTbl &)
+    HashTbl &operator=(HashTbl &other)
     {
-        throw std::runtime_error("Not yet implemented!");
+        throw std::runtime_error("nye");
     }
 
     HashTbl(HashTbl &&)
@@ -317,9 +317,10 @@ public:
         throw std::runtime_error("Not yet implemented!");
     }
 
-    HashTbl &operator=(HashTbl &&)
+    HashTbl &operator=(HashTbl &&rhs)
     {
-        throw std::runtime_error("Not yet implemented!");
+        std::swap(*this, rhs);
+        return *this;
     }
 
     size_t ctrlchunk_buf_size()
@@ -376,7 +377,7 @@ public:
         size_t entry_idx = h % max_nr_entries;
         uint32_t ctrlchunk_idx = entry_idx / CtrlChunk::NR_BYTES;
         uint32_t ctrlbyte_offset = entry_idx % CtrlChunk::NR_BYTES;
-        std::cout << "entry_idx = " << entry_idx << std::endl;
+        // std::cout << "entry_idx = " << entry_idx << std::endl;
 
         CtrlChunk ctrlchunk = *(ctrlchunks + ctrlchunk_idx);
         ctrlmask_t keep_mask = std::numeric_limits<ctrlmask_t>::max() << ctrlbyte_offset;
@@ -385,24 +386,24 @@ public:
         ctrlmask_t empty_mask =
             simd<ctrlchunk_t>::movemask_eq(ctrlchunk.as_simd(), CtrlChunk::CTRL_EMPTY) & keep_mask;
         while (true) {
-            char the_bin;
-            std::cin >> the_bin;
-            std::cout << "keep_mask  = " << std::bitset<16>(keep_mask) << std::endl;
-            std::cout << "hit_mask   = " << std::bitset<16>(hit_mask) << std::endl;
-            std::cout << "empty_mask = " << std::bitset<16>(empty_mask) << std::endl;
-            std::cout << "ctrlchunk_idx = " << ctrlchunk_idx << std::endl;
-            std::cout << "ctrlbyte_offset = " << ctrlbyte_offset << std::endl;
+            // char the_bin;
+            // std::cin >> the_bin;
+            // std::cout << "keep_mask  = " << std::bitset<16>(keep_mask) << std::endl;
+            // std::cout << "hit_mask   = " << std::bitset<16>(hit_mask) << std::endl;
+            // std::cout << "empty_mask = " << std::bitset<16>(empty_mask) << std::endl;
+            // std::cout << "ctrlchunk_idx = " << ctrlchunk_idx << std::endl;
+            // std::cout << "ctrlbyte_offset = " << ctrlbyte_offset << std::endl;
 
             // ctz appears to be faster than alternative methods TODO: test
-            uint32_t empty_mask_tz = __builtin_ctz(empty_mask);
+            int empty_mask_tz = __builtin_ctz(empty_mask);
             if (!hit_mask || empty_mask_tz < __builtin_ctz(hit_mask)) {
                 // If we have no matches, but there is an empty slot, we just
                 // put it there
                 if (empty_mask) {
                     ctrlbyte_offset = empty_mask_tz;
-                    std::cout << "found empty slot at "
-                              << (ctrlchunk_idx * CtrlChunk::NR_BYTES + ctrlbyte_offset)
-                              << std::endl;
+                    // std::cout << "found empty slot at "
+                    //           << (ctrlchunk_idx * CtrlChunk::NR_BYTES + ctrlbyte_offset)
+                    //           << std::endl;
                     size_t i = ctrlchunk_idx * CtrlChunk::NR_BYTES + ctrlbyte_offset;
                     slot = entries + i;
                     ctrl_slot = (char *)ctrlchunks_buf() + i;
@@ -460,7 +461,7 @@ public:
         Entry *slot;
         char *ctrl_slot;
         bool empty = get_slot(h, key, slot, ctrl_slot);
-        
+
         if (empty) return nullptr;
         return &slot->val;
     }
