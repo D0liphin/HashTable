@@ -15,7 +15,7 @@ public:
         , val(val)
         , moved(false)
     {
-        std::cout << name << "()" << std::endl;
+        std::cout << name << "(" << val << ")" << std::endl;
     }
 
     Logger(const Logger &other)
@@ -109,15 +109,12 @@ std::string bin(size_t n)
 
 int main()
 {
-    using Key = Logger<std::string>;
-    using Val = Logger<size_t>;
-    HashTbl<Key, Val> shopping_list;
-    for (size_t i = 0; i < 17; ++i) {
-        shopping_list.insert(Key("Key", bin(i)), Val("Val", i));
+    HashTbl<std::string, size_t> tbl;
+    for (size_t i = 0; i < 16; ++i) {
+        tbl.insert(bin(i), i);
     }
-    for (auto kv : shopping_list) {
+    for (auto kv : tbl) {
         std::cout << kv.first << ": " << kv.second << std::endl;
     }
-
     return 0;
 }

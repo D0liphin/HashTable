@@ -192,6 +192,16 @@ struct alignas(alignof(ctrlchunk_t)) CtrlChunk
 };
 static_assert(sizeof(CtrlChunk) == sizeof(ctrlchunk_t));
 
+/**
+ * Align `n` up to the nearest power of `pow2`. UB if `pow2` is not a power of
+ * 2. 
+ */
+size_t inline alignup(size_t n, size_t pow2)
+{
+    size_t mask = pow2 - 1;
+    return (n + mask) & ~mask;
+}
+
 template <typename Key, typename Val> struct HashTbl
 {
     static_assert(is_hashable<Key>::value, "Key must be hashable");
@@ -280,12 +290,6 @@ public:
 
         size_t idx()
         {
-            // std::cout << "idx()" << std::endl;
-            // std::cout << "  ctrlchunk_idx = " << ctrlchunk_idx << std::endl;
-            // std::cout << "  __builtin_ctz(" << std::bitset<CtrlChunk::NR_BYTES>(present_mask) << ")"
-            //           << std::endl;
-            // size_t ret = __builtin_ctz(present_mask) + ctrlchunk_idx * CtrlChunk::NR_BYTES;
-            // std::cout << "  --> " << ret << std::endl;
             return __builtin_ctz(present_mask) + ctrlchunk_idx * CtrlChunk::NR_BYTES;
         }
 
@@ -315,16 +319,12 @@ public:
 
         bool find_next_present()
         {
-            // std::cout << "find_next_present()" << std::endl;
             if (*this == tbl.end()) {
-                // std::cout << "iterator already exhausted" << std::endl;
                 return false;
             }
             while (!present_mask) {
                 ctrlchunk_idx++;
-                // std::cout << "ctrlchunk_idx++" << std::endl;
                 if (*this == tbl.end()) {
-                    // std::cout << "exhausted iterator" << std::endl;
                     return false;
                 }
                 present_mask = tbl.ctrlchunks_buf()[ctrlchunk_idx].present_mask();
@@ -378,7 +378,7 @@ public:
     {
         auto self = Self();
         // alignup
-        self.max_nr_entries = (capacity / CtrlChunk::NR_BYTES + 1) * CtrlChunk::NR_BYTES;
+        self.max_nr_entries = alignup(capacity, CtrlChunk::NR_BYTES);
         if (posix_memalign((void **)&self.buf, BUF_ALIGNMENT, self.buf_size())) {
             throw std::runtime_error("OOM");
         }
@@ -400,17 +400,17 @@ public:
 
     HashTbl(HashTbl &)
     {
-        throw std::runtime_error("Not yet implemented!");
+        throw std::runtime_error("copy ctor not implemented");
     }
 
     HashTbl &operator=(HashTbl &other)
     {
-        throw std::runtime_error("nyi");
+        throw std::runtime_error("copy assignment not implemented");
     }
 
     HashTbl(HashTbl &&)
     {
-        throw std::runtime_error("Not yet implemented!");
+        throw std::runtime_error("move ctor not implemented");
     }
 
     HashTbl &operator=(HashTbl &&rhs)
@@ -451,17 +451,28 @@ public:
         auto newtbl =
             Self::with_capacity(max_nr_entries ? max_nr_entries * 2 : CtrlChunk::NR_BYTES * 1);
         for (auto it = begin(); it != end(); ++it) {
-            // TODO: we can save a bit of time by not rehashing
+            // This is probably a C++ anti-pattern, but I come from Rust-land
+            // Where it is also an anti-pattern, but ermm.... whatever?
+            //
+            // We want to move the `Entry` out of the old thing, but we don't 
+            // need to do a copy-and-swap move-assignment, so we just do a
+            // memcpy and then a move ctor for both Key and Val.
+            //
+            // TODO: I will be shocked if there is a genuine need for this mess.
+            // Fix this at some point.
             using ManuallyDropEntry =
                 typename std::aligned_storage<sizeof(Entry), alignof(Entry)>::type;
             ManuallyDropEntry e_mu;
             it.read((Entry *)&e_mu);
             Entry &e = reinterpret_cast<Entry &>(static_cast<ManuallyDropEntry &>(e_mu));
+            // TODO: we can save a bit of time by not rehashing
             newtbl.insert(std::move(e.key), std::move(e.val));
         }
-        memcpy(this, &newtbl, sizeof(Self));
+        free(buf);
+        buf = newtbl.buf;
         newtbl.buf = nullptr;
-        std::cout << "finished growing" << std::endl;
+        max_nr_entries = newtbl.max_nr_entries;
+        nr_used = newtbl.nr_used;
     }
 
     CtrlChunk *ctrlchunks_buf() const
@@ -494,11 +505,7 @@ public:
      */
     bool get_slot(size_t h, Key const &key, Entry *&slot, char *&ctrl_slot)
     {
-        std::cout << "start: get_slot()" << std::endl;
-        if (needs_to_grow()) {
-            std::cout << "grow()" << std::endl;
-            grow();
-        }
+        if (needs_to_grow()) grow();
 
         Entry *entries = entries_buf();
         CtrlChunk *ctrlchunks = ctrlchunks_buf();
@@ -517,22 +524,12 @@ public:
         ctrlmask_t empty_mask =
             simd<ctrlchunk_t>::movemask_eq(ctrlchunk.as_simd(), CtrlChunk::CTRL_EMPTY) & keep_mask;
         while (true) {
-            // std::cout << std::endl;
-            // std::cout << "keep_mask  = " << std::bitset<16>(keep_mask) << std::endl;
-            // std::cout << "hit_mask   = " << std::bitset<16>(hit_mask) << std::endl;
-            // std::cout << "empty_mask = " << std::bitset<16>(empty_mask) << std::endl;
-            // std::cout << "ctrlchunk_idx = " << ctrlchunk_idx << std::endl;
-            // std::cout << "ctrlbyte_offset = " << ctrlbyte_offset << std::endl;
-
             // ctz appears to be faster than alternative methods TODO: test
             if (!hit_mask || (empty_mask && __builtin_ctz(empty_mask) < __builtin_ctz(hit_mask))) {
                 // If we have no matches, but there is an empty slot, we just
                 // put it there
                 if (empty_mask) {
                     ctrlbyte_offset = __builtin_ctz(empty_mask);
-                    // std::cout << "found empty slot at "
-                    //           << (ctrlchunk_idx * CtrlChunk::NR_BYTES + ctrlbyte_offset)
-                    //           << std::endl;
                     size_t i = ctrlchunk_idx * CtrlChunk::NR_BYTES + ctrlbyte_offset;
                     slot = entries + i;
                     ctrl_slot = (char *)ctrlchunks_buf() + i;
@@ -569,17 +566,14 @@ public:
      */
     Val *insert(Key key, Val val)
     {
-        std::cout << "start: insert()" << std::endl;
         size_t h = is_hashable<Key>::hash(key);
         Entry *slot;
         char *ctrl_slot;
         get_slot(h, key, slot, ctrl_slot);
-        std::cout << "end: get_slot()" << std::endl;
 
         new (slot) Entry(h, std::move(key), std::move(val));
         *ctrl_slot = h7(h);
         nr_used++;
-        std::cout << "end: insert()" << std::endl;
         return &(slot->val);
     }
 
