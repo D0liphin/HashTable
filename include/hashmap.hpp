@@ -252,13 +252,6 @@ public:
         Entry(const Entry &other) = delete;
 
         Entry &operator=(const Entry &other) = delete;
-        // {
-        //     if (this != &other) {
-        //         this.hash = other.hash;
-        //         this.key = other.key;
-        //         this.val = other.val;
-        //     }
-        // }
 
         Entry(Entry &&other) noexcept
             : hash(other.hash)
@@ -278,11 +271,107 @@ public:
         ~Entry() = default;
     };
 
+    struct Iter
+    {
+    private:
+        size_t ctrlchunk_idx;
+        ctrlmask_t present_mask;
+        HashTbl<Key, Val> const &tbl;
+
+        size_t idx()
+        {
+            // std::cout << "idx()" << std::endl;
+            // std::cout << "  ctrlchunk_idx = " << ctrlchunk_idx << std::endl;
+            // std::cout << "  __builtin_ctz(" << std::bitset<CtrlChunk::NR_BYTES>(present_mask) << ")"
+            //           << std::endl;
+            // size_t ret = __builtin_ctz(present_mask) + ctrlchunk_idx * CtrlChunk::NR_BYTES;
+            // std::cout << "  --> " << ret << std::endl;
+            return __builtin_ctz(present_mask) + ctrlchunk_idx * CtrlChunk::NR_BYTES;
+        }
+
+    public:
+        Iter(HashTbl<Key, Val> const &tbl)
+            : tbl(tbl)
+        {
+        }
+
+        Iter &begin()
+        {
+            ctrlchunk_idx = 0;
+            if (tbl.max_nr_entries == 0) {
+                present_mask = 0;
+            } else {
+                present_mask = tbl.ctrlchunks_buf()->present_mask();
+                find_next_present();
+            }
+            return *this;
+        }
+
+        Iter &end()
+        {
+            ctrlchunk_idx = tbl.max_nr_entries / CtrlChunk::NR_BYTES;
+            return *this;
+        }
+
+        bool find_next_present()
+        {
+            // std::cout << "find_next_present()" << std::endl;
+            if (*this == tbl.end()) {
+                // std::cout << "iterator already exhausted" << std::endl;
+                return false;
+            }
+            while (!present_mask) {
+                ctrlchunk_idx++;
+                // std::cout << "ctrlchunk_idx++" << std::endl;
+                if (*this == tbl.end()) {
+                    // std::cout << "exhausted iterator" << std::endl;
+                    return false;
+                }
+                present_mask = tbl.ctrlchunks_buf()[ctrlchunk_idx].present_mask();
+            }
+            return true;
+        }
+
+        Iter &operator++()
+        {
+            if (!present_mask) return *this; // we reached the end
+            ctrlmask_t keep_mask = ~(1u << (ctrlmask_t)__builtin_ctz(present_mask));
+            present_mask &= keep_mask;
+            find_next_present(); // move cursor to next present
+            return *this;
+        }
+
+        std::pair<Key const &, Val &> operator*()
+        {
+            // std::cout << "operator*(), idx() = " << idx() << std::endl;
+            Entry *e = tbl.entries_buf() + idx();
+            return std::pair<Key const &, Val &>(e->key, e->val);
+        }
+
+        bool operator==(Iter const &other)
+        {
+            return ctrlchunk_idx == other.ctrlchunk_idx;
+        }
+
+        bool operator!=(Iter const &other)
+        {
+            return !(*this == other);
+        }
+
+        /**
+         * Unsafe -- we are doing a pointer read of the entry, make sure you 
+         * don't call the destructor for one of these 
+         */
+        void read(Entry *dst)
+        {
+            memcpy(dst, tbl.entries_buf() + idx(), sizeof(Entry));
+        }
+    };
+
     HashTbl()
         : buf(nullptr)
         , nr_used(0)
     {
-        *this = std::move(Self::with_capacity(16 * 12));
     }
 
     static Self with_capacity(size_t capacity)
@@ -299,7 +388,10 @@ public:
 
     ~HashTbl()
     {
-        if (buf) free(buf);
+        if (buf) {
+            free(buf);
+            // TODO: incomplete -- we must destruct all keys and all values
+        }
     }
 
     HashTbl(HashTbl &)
@@ -323,7 +415,7 @@ public:
         return *this;
     }
 
-    size_t ctrlchunk_buf_size()
+    size_t ctrlchunk_buf_size() const
     {
         // We need to make this assumption for our calculation to make sense --
         // that the byte directly after our ctrl chunks is ctrlchunk_t-aligned.
@@ -333,22 +425,42 @@ public:
         return sizeof(ctrlchunk_t) * max_nr_entries + padding_sz;
     }
 
-    size_t buf_size()
+    size_t buf_size() const
     {
         return ctrlchunk_buf_size() + sizeof(Entry) * max_nr_entries;
     }
 
-    void grow()
+    Iter begin() const
     {
-        throw std::runtime_error("not yet implemented");
+        return Iter(*this).begin();
     }
 
-    CtrlChunk *ctrlchunks_buf()
+    Iter end() const
+    {
+        // The end is actually just an index that we compare against. No point
+        // constructing a whole iterator
+        return Iter(*this).end();
+    }
+
+    void grow()
+    {
+        auto newtbl = HashTbl<Key, Val>::with_capacity(max_nr_entries * 2);
+        for (auto it = begin(); it != end(); ++it) {
+            // TODO: we can save a bit of time by not rehashing
+            Entry e;
+            it.read(&e);
+            newtbl.insert(std::move(e.key), std::move(e.val));
+        }
+        *this = std::move(newtbl);
+        newtbl.buf = nullptr; // don't run any destructor
+    }
+
+    CtrlChunk *ctrlchunks_buf() const
     {
         return (CtrlChunk *)buf;
     }
 
-    Entry *entries_buf()
+    Entry *entries_buf() const
     {
         return (Entry *)(buf + ctrlchunk_buf_size());
     }
@@ -386,8 +498,7 @@ public:
         ctrlmask_t empty_mask =
             simd<ctrlchunk_t>::movemask_eq(ctrlchunk.as_simd(), CtrlChunk::CTRL_EMPTY) & keep_mask;
         while (true) {
-            // char the_bin;
-            // std::cin >> the_bin;
+            // std::cout << std::endl;
             // std::cout << "keep_mask  = " << std::bitset<16>(keep_mask) << std::endl;
             // std::cout << "hit_mask   = " << std::bitset<16>(hit_mask) << std::endl;
             // std::cout << "empty_mask = " << std::bitset<16>(empty_mask) << std::endl;

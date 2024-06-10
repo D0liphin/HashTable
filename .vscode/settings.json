@@ -1,0 +1,31 @@
+{
+  "files.associations": {
+    "*.h": "c",
+    "*.s": "arm",
+    "cwchar": "cpp",
+    "unordered_map": "cpp",
+    "vector": "cpp",
+    "exception": "cpp",
+    "functional": "cpp",
+    "initializer_list": "cpp",
+    "iosfwd": "cpp",
+    "istream": "cpp",
+    "new": "cpp",
+    "ostream": "cpp",
+    "stdexcept": "cpp",
+    "streambuf": "cpp",
+    "type_traits": "cpp",
+    "array": "cpp",
+    "deque": "cpp",
+    "string": "cpp",
+    "string_view": "cpp",
+    "*.tcc": "cpp",
+    "bitset": "cpp",
+    "cmath": "cpp",
+    "memory": "cpp",
+    "random": "cpp",
+    "numeric": "cpp",
+    "sstream": "cpp",
+    "system_error": "cpp"
+  }
+}

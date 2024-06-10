@@ -49,25 +49,28 @@ public:
     }
 };
 
-template<typename T>
-struct Wrapper
+template <typename T> struct Wrapper
 {
     T val;
-    Wrapper(T v) : val(v) {} 
+    Wrapper(T v)
+        : val(v)
+    {
+    }
 };
 
 int main()
 {
     auto shopping_list = HashTbl<std::string, int>::with_capacity(16);
     shopping_list.insert("apple", 5);
-    int apple = *shopping_list.get("apple");
-    std::cout << "shopping_list.get(\"apple\") = " << apple << std::endl;
-
+    shopping_list.insert("banana", 2);
+    shopping_list.insert("milk", 1);
+    for (auto kv : shopping_list) {
+        std::cout << kv.first << ": " << kv.second << std::endl;
+    }
     return 0;
 }
 
-
-// #include <cassert>
+// #include <cassert
 
 // // Test Initialization
 // void hashtbl_initialization() {
