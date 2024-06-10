@@ -389,8 +389,12 @@ public:
     ~HashTbl()
     {
         if (buf) {
+            for (auto kv : *this) {
+                const_cast<Key &>(kv.first).~Key();
+                kv.second.~Val();
+            }
             free(buf);
-            // TODO: incomplete -- we must destruct all keys and all values
+            buf = nullptr;
         }
     }
 
@@ -401,7 +405,7 @@ public:
 
     HashTbl &operator=(HashTbl &other)
     {
-        throw std::runtime_error("nye");
+        throw std::runtime_error("nyi");
     }
 
     HashTbl(HashTbl &&)
@@ -444,15 +448,20 @@ public:
 
     void grow()
     {
-        auto newtbl = HashTbl<Key, Val>::with_capacity(max_nr_entries * 2);
+        auto newtbl =
+            Self::with_capacity(max_nr_entries ? max_nr_entries * 2 : CtrlChunk::NR_BYTES * 1);
         for (auto it = begin(); it != end(); ++it) {
             // TODO: we can save a bit of time by not rehashing
-            Entry e;
-            it.read(&e);
+            using ManuallyDropEntry =
+                typename std::aligned_storage<sizeof(Entry), alignof(Entry)>::type;
+            ManuallyDropEntry e_mu;
+            it.read((Entry *)&e_mu);
+            Entry &e = reinterpret_cast<Entry &>(static_cast<ManuallyDropEntry &>(e_mu));
             newtbl.insert(std::move(e.key), std::move(e.val));
         }
-        *this = std::move(newtbl);
-        newtbl.buf = nullptr; // don't run any destructor
+        memcpy(this, &newtbl, sizeof(Self));
+        newtbl.buf = nullptr;
+        std::cout << "finished growing" << std::endl;
     }
 
     CtrlChunk *ctrlchunks_buf() const
@@ -470,6 +479,12 @@ public:
         throw std::runtime_error("nye");
     }
 
+    // Use a 0.75 load factor -- should be decent
+    bool needs_to_grow() const
+    {
+        return nr_used >= max_nr_entries / 4 * 3;
+    }
+
     /**
      * Get the slot where we can insert something with the provided `key`. 
      * 
@@ -479,7 +494,11 @@ public:
      */
     bool get_slot(size_t h, Key const &key, Entry *&slot, char *&ctrl_slot)
     {
-        if (max_nr_entries == 0) grow();
+        std::cout << "start: get_slot()" << std::endl;
+        if (needs_to_grow()) {
+            std::cout << "grow()" << std::endl;
+            grow();
+        }
 
         Entry *entries = entries_buf();
         CtrlChunk *ctrlchunks = ctrlchunks_buf();
@@ -506,12 +525,11 @@ public:
             // std::cout << "ctrlbyte_offset = " << ctrlbyte_offset << std::endl;
 
             // ctz appears to be faster than alternative methods TODO: test
-            int empty_mask_tz = __builtin_ctz(empty_mask);
-            if (!hit_mask || empty_mask_tz < __builtin_ctz(hit_mask)) {
+            if (!hit_mask || (empty_mask && __builtin_ctz(empty_mask) < __builtin_ctz(hit_mask))) {
                 // If we have no matches, but there is an empty slot, we just
                 // put it there
                 if (empty_mask) {
-                    ctrlbyte_offset = empty_mask_tz;
+                    ctrlbyte_offset = __builtin_ctz(empty_mask);
                     // std::cout << "found empty slot at "
                     //           << (ctrlchunk_idx * CtrlChunk::NR_BYTES + ctrlbyte_offset)
                     //           << std::endl;
@@ -551,14 +569,17 @@ public:
      */
     Val *insert(Key key, Val val)
     {
+        std::cout << "start: insert()" << std::endl;
         size_t h = is_hashable<Key>::hash(key);
         Entry *slot;
         char *ctrl_slot;
         get_slot(h, key, slot, ctrl_slot);
+        std::cout << "end: get_slot()" << std::endl;
 
-        new (slot) Entry(h, key, val);
+        new (slot) Entry(h, std::move(key), std::move(val));
         *ctrl_slot = h7(h);
-
+        nr_used++;
+        std::cout << "end: insert()" << std::endl;
         return &(slot->val);
     }
 

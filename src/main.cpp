@@ -3,32 +3,47 @@
 
 #include "hashmap.hpp"
 
-class Logger
+template <typename T> class Logger
 {
 public:
-    // Default Constructor
-    Logger()
+    bool moved;
+    std::string name;
+    T val;
+
+    Logger(std::string name, T val)
+        : name(name)
+        , val(val)
+        , moved(false)
     {
-        std::cout << "Logger()\n";
+        std::cout << name << "()" << std::endl;
     }
 
-    // Copy Constructor
     Logger(const Logger &other)
     {
-        std::cout << "Logger(const Logger &)\n";
+        name = other.name;
+        val = other.val;
+        moved = false;
+        std::cout << name << "(const " << name << " &)" << std::endl;
     }
 
     // Move Constructor
     Logger(Logger &&other) noexcept
     {
-        std::cout << "Logger(Logger &&other)\n";
+        name = std::move(other.name);
+        other.name = name + "[moved]";
+        other.moved = true;
+        val = std::move(other.val);
+        moved = false;
+        std::cout << "\t\t\t\t" << name << "(" << name << " &&)" << std::endl;
     }
 
     // Copy Assignment Operator
     Logger &operator=(const Logger &other)
     {
         if (this != &other) {
-            std::cout << "Logger &operator=Logger(const Logger &)\n";
+            ~Logger();
+            new (this) Logger(other);
+            std::cout << name << " &operator=" << name << "(const" << name << "&)" << std::endl;
         }
         return *this;
     }
@@ -37,7 +52,9 @@ public:
     Logger &operator=(Logger &&other) noexcept
     {
         if (this != &other) {
-            std::cout << "Logger &operator=(Logger &&)\n";
+            name = std::move(other.name);
+            val = std::move(other.val);
+            std::cout << name << " &operator=(" << name << " &&)" << std::endl;
         }
         return *this;
     }
@@ -45,7 +62,29 @@ public:
     // Destructor
     ~Logger()
     {
-        std::cout << "~Logger()\n";
+        if (moved) std::cout << "\t\t\t\t";
+        std::cout << "~" << name << "()" << std::endl;
+        val.~T();
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, Logger<T> const &self)
+    {
+        return os << "Logger(" << self.val << ")";
+    }
+
+    bool operator==(Logger<T> const &other) const
+    {
+        return val == other.val;
+    }
+};
+
+template <typename T> struct is_hashable<Logger<T>>
+{
+    static constexpr bool value = is_hashable<T>::value;
+
+    static size_t hash(Logger<T> const &self)
+    {
+        return is_hashable<T>::hash(self.val);
     }
 };
 
@@ -58,96 +97,27 @@ template <typename T> struct Wrapper
     }
 };
 
+std::string bin(size_t n)
+{
+    std::string str;
+    for (size_t i = 0; i < std::numeric_limits<size_t>::digits; ++i) {
+        size_t mask = ~(std::numeric_limits<size_t>::max() >> 1) >> i;
+        str.push_back((n & mask) ? '1' : '0');
+    }
+    return str;
+}
+
 int main()
 {
-    auto shopping_list = HashTbl<std::string, int>::with_capacity(16);
-    shopping_list.insert("apple", 5);
-    shopping_list.insert("banana", 2);
-    shopping_list.insert("milk", 1);
+    using Key = Logger<std::string>;
+    using Val = Logger<size_t>;
+    HashTbl<Key, Val> shopping_list;
+    for (size_t i = 0; i < 17; ++i) {
+        shopping_list.insert(Key("Key", bin(i)), Val("Val", i));
+    }
     for (auto kv : shopping_list) {
         std::cout << kv.first << ": " << kv.second << std::endl;
     }
+
     return 0;
 }
-
-// #include <cassert
-
-// // Test Initialization
-// void hashtbl_initialization() {
-//     HashTbl<std::string, uint32_t> new_table;
-//     assert(new_table.get("anything") == nullptr);  // Expecting null as the table is empty.
-// }
-
-// // Test Basic Insert and Get
-// void hashtbl_basic_insert_get() {
-//     HashTbl<std::string, uint32_t> basic_test;
-//     basic_test.insert("item1", 100);
-//     assert(*basic_test.get("item1") == 100);
-// }
-
-// // Test Inserting Duplicate Keys
-// void hashtbl_duplicate_keys() {
-//     HashTbl<std::string, uint32_t> duplicate_key_test;
-//     duplicate_key_test.insert("item1", 100);
-//     duplicate_key_test.insert("item1", 200);  // Should overwrite the previous value
-//     assert(*duplicate_key_test.get("item1") == 200);
-// }
-
-// // Test Insert and Get with Multiple Items
-// void hashtbl_multiple_items() {
-//     HashTbl<std::string, uint32_t> multiple_items;
-//     multiple_items.insert("item1", 100);
-//     multiple_items.insert("item2", 200);
-//     multiple_items.insert("item3", 300);
-//     assert(*multiple_items.get("item1") == 100);
-//     assert(*multiple_items.get("item2") == 200);
-//     assert(*multiple_items.get("item3") == 300);
-// }
-
-// // Test Get Nonexistent Key
-// void hashtbl_get_nonexistent_key() {
-//     HashTbl<std::string, uint32_t> nonexistent_key_test;
-//     nonexistent_key_test.insert("item1", 100);
-//     assert(nonexistent_key_test.get("item2") == nullptr);
-// }
-
-// // Test Case Sensitivity
-// void hashtbl_case_sensitivity() {
-//     HashTbl<std::string, uint32_t> case_sensitivity_test;
-//     case_sensitivity_test.insert("Item1", 100);
-//     assert(case_sensitivity_test.get("item1") == nullptr); // Assuming case sensitivity
-//     assert(*case_sensitivity_test.get("Item1") == 100);
-// }
-
-// // Test Inserting Non-String Keys (if applicable)
-// void hashtbl_int_keys() {
-//     // This test depends on HashTbl supporting types other than std::string for keys
-//     HashTbl<int, uint32_t> int_keys;
-//     int_keys.insert(1, 100);
-//     assert(*int_keys.get(1) == 100);
-// }
-
-// // Test Stress
-// void hashtbl_stress_test() {
-//     HashTbl<std::string, uint32_t> stress_test;
-//     for (int i = 0; i < 10000; i++) {
-//         stress_test.insert("item" + std::to_string(i), i);
-//     }
-//     for (int i = 0; i < 10000; i++) {
-//         assert(*stress_test.get("item" + std::to_string(i)) == i);
-//     }
-// }
-
-// int main() {
-//     hashtbl_initialization();
-//     hashtbl_basic_insert_get();
-//     hashtbl_duplicate_keys();
-//     hashtbl_multiple_items();
-//     hashtbl_get_nonexistent_key();
-//     // hashtbl_case_sensitivity();
-//     // hashtbl_int_keys();
-//     // hashtbl_stress_test();
-
-//     std::cout << "All tests passed!" << std::endl;
-//     return 0;
-// }
