@@ -2,6 +2,7 @@
 
 I always wanted to make a hash table. Here is one that is inspired by
 Google's swiss table... The implementations are quite different though.
+Read about the high-level design [here](https://www.oliveriliffe.net/blog/hashtbl.html)
 I hope to fill this README with a bunch of benchmarks soon.
 
 ## Usage
