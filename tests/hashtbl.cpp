@@ -5,6 +5,7 @@
 
 #define RUNTEST(fn)                                                    \
     ({                                                                 \
+        std::cout << "\033[1;34m  start:\033[0m " << #fn << std::endl; \
         auto f = fn;                                                   \
         f();                                                           \
         std::cout << "\033[1;32msuccess:\033[0m " << #fn << std::endl; \
@@ -58,6 +59,14 @@ struct test_suite
         }
     }
 
+    static void test_int_overrides_old_val()
+    {
+        TestMap<int, int> testmap;
+        IMap<TestMap, int, int>::insert(testmap, 5, 4);
+        IMap<TestMap, int, int>::insert(testmap, 5, 42);
+        assert_eq((IMap<TestMap, int, int>::get(testmap, 5)), 42);
+    }
+
     static void test_sequence_of_random_operations_against_oracle()
     {
 #define INSERT 0
@@ -70,15 +79,19 @@ struct test_suite
         std::random_device rd;
         std::mt19937_64 gen(rd());
         std::uniform_int_distribution<int> dis(0, std::numeric_limits<int>::max());
-        int maxv = 1 << 9;
-        for (size_t _ = 0; _ < (1 << 12); ++_) {
+        int maxv = 1 << 20;
+        for (size_t it = 0; it < (1 << 25); ++it) {
+            if (it % 100000 == 0) {
+                for (int n = 0; n < 10; ++n)
+                    std::cout << "\b\b\b\b\b";
+                std::cout << "tested " << it << " operations against oracle..." << std::flush;
+            }
             int fn = dis(gen) % REMOVE;
             int k, v;
             switch (fn) {
             case INSERT: {
                 k = dis(gen) % maxv;
                 v = dis(gen) % maxv;
-                std::cout << "INSERT(" << k << ", " << v << ")" << std::endl;
                 IMap<TestMap, int, int>::insert(testmap, k, v);
                 IMap<OracleMap, int, int>::insert(oraclemap, k, v);
                 break;
@@ -99,7 +112,9 @@ struct test_suite
                 int testv = IMap<TestMap, int, int>::get(testmap, k);
                 int oraclev = IMap<OracleMap, int, int>::get(oraclemap, k);
                 if (testv != oraclev) {
-                    std::cout << "k = " << k << std::endl;
+                    for (auto kv : testmap) {
+                        std::cout << kv.first << " : " << kv.second << std::endl;
+                    }
                 }
                 assert_eq(testv, oraclev);
                 break;
@@ -115,14 +130,16 @@ struct test_suite
                 throw std::runtime_error("unreachable");
             }
         }
+        std::cout << std::endl;
     }
 };
 
 int main()
 {
-    using tests = test_suite<HashTbl, default_std_unordered_map_t>;
+    using tests = test_suite<default_std_unordered_map_t, HashTbl>;
     RUNTEST(tests::test_uint64_inserts_persist);
     RUNTEST(tests::test_uint64_marks_entries_contained);
+    RUNTEST(tests::test_int_overrides_old_val);
     RUNTEST(tests::test_sequence_of_random_operations_against_oracle);
     return 0;
 }

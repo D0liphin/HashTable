@@ -23,9 +23,9 @@ RESET=\033[0m
 # the compiler to be used
 CC=g++
 # flags for compiling translation units
-CFLAGS=-std=$(STD) -Wall -Wextra -Wno-ignored-attributes -Wno-class-memaccess  -O3 -g $(foreach dir, $(INCLUDE),-I $(dir))
+CFLAGS=-std=$(STD) -Wall -Wextra -Wno-ignored-attributes -Wno-class-memaccess -fsanitize=address,undefined -O3 -g $(foreach dir, $(INCLUDE),-I $(dir))
 # flags for linking
-LFLAGS=
+LFLAGS=-fsanitize=address,undefined
 # where all generated files are stored
 TARGET=./target
 # name of the built executable

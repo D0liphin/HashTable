@@ -112,12 +112,12 @@ std::string bin(size_t n)
 
 int main()
 {
-    for (size_t nr_insertions = 8; nr_insertions <= (8 << 8); nr_insertions <<= 1) {
-        HashTbl<size_t, size_t> tbl;
-        std::cout << "Doing " << nr_insertions << " insertions" << std::endl;
-        for (size_t i = 0; i < nr_insertions; ++i) {
-            tbl.insert(i, 0);
-        }
-    }
+    // for (size_t nr_insertions = 8; nr_insertions <= (8 << 8); nr_insertions <<= 1) {
+    //     HashTbl<size_t, size_t> tbl;
+    //     std::cout << "Doing " << nr_insertions << " insertions" << std::endl;
+    //     for (size_t i = 0; i < nr_insertions; ++i) {
+    //         tbl.insert(i, 0);
+    //     }
+    // }
     return 0;
 }

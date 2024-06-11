@@ -68,7 +68,7 @@ template <typename K, typename V> struct IMap<default_std_unordered_map_t, K, V>
 
     static void insert(Map &map, K k, V v)
     {
-        map.insert({ std::move(k), std::move(v) });
+        map[k] = std::move(v);
     }
 
     static bool contains(Map const &map, K const &k)

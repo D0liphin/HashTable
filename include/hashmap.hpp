@@ -548,7 +548,7 @@ public:
             size_t i = ctrlchunk_idx * CtrlChunk::NR_BYTES + ctrlbyte_offset;
             Entry *entry = entries + i;
             if (cmp_keys(h, key, entry->hash, entry->key)) {
-                slot = entries + i;
+                slot = entry;
                 ctrl_slot = (char *)ctrlchunks_buf() + i;
                 return false;
             }
@@ -570,12 +570,11 @@ public:
         char *ctrl_slot;
         bool empty = get_slot(h, key, slot, ctrl_slot);
         if (!empty) {
-            slot->val.~Val();
-            slot->key.~Key();
+            slot->val = std::move(val);
+        } else {
+            new (slot) Entry(h, std::move(key), std::move(val));
+            *ctrl_slot = h7(h);
         }
-
-        new (slot) Entry(h, std::move(key), std::move(val));
-        *ctrl_slot = h7(h);
         nr_used++;
         return &(slot->val);
     }
