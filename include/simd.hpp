@@ -3,6 +3,7 @@
 #include <emmintrin.h>
 #include <cstdint>
 #include <limits>
+#include <cstring>
 
 template <size_t NR_BITS> struct unsigned_int
 {
@@ -42,8 +43,13 @@ template <> struct usimd<__m128i>
 
     static movemask_t movemask_i8(__m128i i)
     {
-        int ret = _mm_movemask_epi8(i);
-        return *(movemask_t *)&ret;
+        // dw, this is as you would expect,
+        // pmovmskb        eax, xmm0
+        // ret
+        int mm = _mm_movemask_epi8(i);
+        movemask_t ret;
+        memcpy(&ret, &mm, sizeof(movemask_t));
+        return ret;
     }
 };
 

@@ -1,6 +1,9 @@
 #include <iostream>
 #include <string>
+#include <chrono>
+#include <unordered_map>
 
+#include "ihashmap.hpp"
 #include "hashmap.hpp"
 
 template <typename T> class Logger
@@ -109,12 +112,12 @@ std::string bin(size_t n)
 
 int main()
 {
-    HashTbl<std::string, size_t> tbl;
-    for (size_t i = 0; i < 16; ++i) {
-        tbl.insert(bin(i), i);
-    }
-    for (auto kv : tbl) {
-        std::cout << kv.first << ": " << kv.second << std::endl;
+    for (size_t nr_insertions = 8; nr_insertions <= (8 << 8); nr_insertions <<= 1) {
+        HashTbl<size_t, size_t> tbl;
+        std::cout << "Doing " << nr_insertions << " insertions" << std::endl;
+        for (size_t i = 0; i < nr_insertions; ++i) {
+            tbl.insert(i, 0);
+        }
     }
     return 0;
 }

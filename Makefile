@@ -5,7 +5,7 @@ ENTRY_POINT=./src/main.cpp
 # `./test`. Note that this filters out non-source files later in the Makefile 
 RUN_TESTS=$(wildcard ./tests/*)
 # all directories that might contain header files
-INCLUDE=. ./include
+INCLUDE=. ./include ./benchmark/include
 # all directories that might contain source files
 SRC=. ./src ./include
 # all extensions that should be considered as C++ source files
@@ -23,9 +23,9 @@ RESET=\033[0m
 # the compiler to be used
 CC=g++
 # flags for compiling translation units
-CFLAGS=-std=$(STD) -Wall -Wextra -Wno-ignored-attributes -fsanitize=undefined,address -g $(foreach dir, $(INCLUDE),-I $(dir))
+CFLAGS=-std=$(STD) -Wall -Wextra -Wno-ignored-attributes -Wno-class-memaccess  -O3 -g $(foreach dir, $(INCLUDE),-I $(dir))
 # flags for linking
-LFLAGS=-fsanitize=undefined,address
+LFLAGS=
 # where all generated files are stored
 TARGET=./target
 # name of the built executable
@@ -108,6 +108,9 @@ ifneq ($(TESTS),)
 else
 	@echo "$(RED)Error$(RESET): no test files found -- nothing to test! (-_-)"
 endif
+
+build-benchmarks: Makefile
+	$(CC) $(CFLAGS) ./benchmarksrc/benchmark.cpp -isystem ./benchmark/include -Lbenchmark/build/src -lbenchmark -lpthread -o ./target/benchmark
 	
 # build each .o file from the appropriate source file
 # Since .o files contain the source file information after stripping $(TARGET) 

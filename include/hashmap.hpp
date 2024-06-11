@@ -343,7 +343,6 @@ public:
 
         std::pair<Key const &, Val &> operator*()
         {
-            // std::cout << "operator*(), idx() = " << idx() << std::endl;
             Entry *e = tbl.entries_buf() + idx();
             return std::pair<Key const &, Val &>(e->key, e->val);
         }
@@ -370,6 +369,7 @@ public:
 
     HashTbl()
         : buf(nullptr)
+        , max_nr_entries(0)
         , nr_used(0)
     {
     }
@@ -449,12 +449,12 @@ public:
     void grow()
     {
         auto newtbl =
-            Self::with_capacity(max_nr_entries ? max_nr_entries * 2 : CtrlChunk::NR_BYTES * 1);
+            Self::with_capacity(max_nr_entries ? max_nr_entries * 4 : CtrlChunk::NR_BYTES * 4);
         for (auto it = begin(); it != end(); ++it) {
             // This is probably a C++ anti-pattern, but I come from Rust-land
             // Where it is also an anti-pattern, but ermm.... whatever?
             //
-            // We want to move the `Entry` out of the old thing, but we don't 
+            // We want to move the `Entry` out of the old thing, but we don't
             // need to do a copy-and-swap move-assignment, so we just do a
             // memcpy and then a move ctor for both Key and Val.
             //
@@ -493,7 +493,7 @@ public:
     // Use a 0.75 load factor -- should be decent
     bool needs_to_grow() const
     {
-        return nr_used >= max_nr_entries / 4 * 3;
+        return nr_used >= max_nr_entries / 8 * 7;
     }
 
     /**
@@ -515,7 +515,6 @@ public:
         size_t entry_idx = h % max_nr_entries;
         uint32_t ctrlchunk_idx = entry_idx / CtrlChunk::NR_BYTES;
         uint32_t ctrlbyte_offset = entry_idx % CtrlChunk::NR_BYTES;
-        // std::cout << "entry_idx = " << entry_idx << std::endl;
 
         CtrlChunk ctrlchunk = *(ctrlchunks + ctrlchunk_idx);
         ctrlmask_t keep_mask = std::numeric_limits<ctrlmask_t>::max() << ctrlbyte_offset;
@@ -569,7 +568,11 @@ public:
         size_t h = is_hashable<Key>::hash(key);
         Entry *slot;
         char *ctrl_slot;
-        get_slot(h, key, slot, ctrl_slot);
+        bool empty = get_slot(h, key, slot, ctrl_slot);
+        if (!empty) {
+            slot->val.~Val();
+            slot->key.~Key();
+        }
 
         new (slot) Entry(h, std::move(key), std::move(val));
         *ctrl_slot = h7(h);
@@ -591,8 +594,16 @@ public:
         if (empty) return nullptr;
         return &slot->val;
     }
-};
 
-//
-// std::cout << "buf = " << (void *)buf << ", buf size = " << buf_size() << std::endl;
-// std::cout << (void *)slot << std::endl;
+    void remove(Key const &key)
+    {
+        size_t h = is_hashable<Key>::hash(key);
+        Entry *slot;
+        char *ctrl_slot;
+        // empty, no need to mark deleted
+        if (get_slot(h, key, slot, ctrl_slot)) return;
+        *ctrl_slot = CtrlChunk::CTRL_DEL;
+        slot->key.~Key();
+        slot->val.~Val();
+    }
+};
