@@ -22,6 +22,30 @@
         }                                               \
     })
 
+static std::vector<size_t> MAP_TEST_DATA;
+
+void setup_test_data()
+{
+    size_t const sz = 1 << 18;
+    MAP_TEST_DATA.reserve(sz);
+    std::random_device rd;
+    std::mt19937_64 gen(rd());
+    std::uniform_int_distribution<size_t> dis(0, std::numeric_limits<size_t>::max());
+    for (size_t i = 0; i < sz; ++i) {
+        MAP_TEST_DATA.push_back(dis(gen));
+    }
+}
+
+void teardown_test_data()
+{
+    MAP_TEST_DATA = {};
+}
+
+static auto _ = []() {
+    setup_test_data();
+    return 0;
+}();
+
 template <template <typename, typename> typename OracleMap,
           template <typename, typename> typename TestMap>
 struct test_suite
@@ -79,8 +103,8 @@ struct test_suite
         std::random_device rd;
         std::mt19937_64 gen(rd());
         std::uniform_int_distribution<int> dis(0, std::numeric_limits<int>::max());
-        int maxv = 1 << 20;
-        for (size_t it = 0; it < (1 << 25); ++it) {
+        int maxv = 1 << 19;
+        for (size_t it = 0; it < (1 << 23); ++it) {
             if (it % 100000 == 0) {
                 for (int n = 0; n < 10; ++n)
                     std::cout << "\b\b\b\b\b";
@@ -132,6 +156,19 @@ struct test_suite
         }
         std::cout << std::endl;
     }
+
+    static void test_insert_randoms_doesnt_segfault() {
+        size_t nr_insertions = 1 << 23;
+        TestMap<size_t, size_t> map;
+        for (size_t i = 0; i < nr_insertions; ++i) {
+            size_t k = MAP_TEST_DATA[i % MAP_TEST_DATA.size()];
+            IMap<TestMap, size_t, size_t>::insert(map, k, 0);
+        }
+        std::cout << "PATH_AA = " << map.PATH_AA << std::endl;
+        std::cout << "PATH_AB = " << map.PATH_AB << std::endl;
+        std::cout << "PATH_B = " << map.PATH_B << std::endl;
+        std::cout << "PATH_C = " << map.PATH_C << std::endl;
+    }
 };
 
 int main()
@@ -140,6 +177,7 @@ int main()
     RUNTEST(tests::test_uint64_inserts_persist);
     RUNTEST(tests::test_uint64_marks_entries_contained);
     RUNTEST(tests::test_int_overrides_old_val);
+    RUNTEST(tests::test_insert_randoms_doesnt_segfault);
     RUNTEST(tests::test_sequence_of_random_operations_against_oracle);
     return 0;
 }

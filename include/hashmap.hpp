@@ -133,52 +133,6 @@ struct alignas(alignof(ctrlchunk_t)) CtrlChunk
         return bytes[i];
     }
 
-    static constexpr uint32_t CTRL_FIND_FOUND = 0;
-    static constexpr uint32_t CTRL_FIND_NOTHING = 1;
-    static constexpr uint32_t CTRL_FIND_MAYBE = 2;
-
-    /**
-     * Scan for `b`, starting at `start`. 
-     * 
-     * # Returns 
-     * - `CTRL_FIND_FOUND` if we find this ctrl byte and set `offset` to the 
-     *   location.
-     * - `CTRL_FIND_MAYBE` if this ctrl chunk did not contain sufficient
-     *   information to prove that `b` exists nowhere in the map. `offset` is
-     *   not written to.
-     * - `CTRL_FIND_NOTHING` if `b` exists nowhere in this map. `offset` is set
-     *   to the index of the first subsequent empty slot
-     */
-    uint32_t find(char b, uint32_t start, uint32_t &offset)
-    {
-        ctrlmask_t const keep_mask = std::numeric_limits<ctrlmask_t>::max() << start;
-        ctrlmask_t const eq_mask = simd<ctrlchunk_t>::movemask_eq(as_simd(), b) & keep_mask;
-        if (eq_mask) {
-            offset = __builtin_ctz(eq_mask);
-            return CTRL_FIND_FOUND;
-        }
-        ctrlmask_t const empty_mask = simd<ctrlchunk_t>::movemask_eq(as_simd(), CTRL_EMPTY) &
-                                      keep_mask;
-        if (empty_mask) {
-            offset = __builtin_ctz(empty_mask);
-            return CTRL_FIND_NOTHING;
-        }
-        return CTRL_FIND_MAYBE;
-    }
-
-    /**
-     * Find the first free byte, returning its offset from the start of this 
-     * byte. Ignore the first `start` bytes. Returns `NR_BYTES` if there are no
-     * empty slots.
-     */
-    uint32_t find_empty(uint32_t start)
-    {
-        ctrlmask_t const keep_mask = std::numeric_limits<ctrlmask_t>::max() << start;
-        ctrlmask_t const empty_mask = simd<ctrlchunk_t>::movemask_eq(as_simd(), CTRL_EMPTY) &
-                                      keep_mask;
-        return empty_mask ? __builtin_ctz(empty_mask) : NR_BYTES;
-    }
-
     /**
      * Get a mask with a `1` at every location where there is a non-deleted
      * entry present.
@@ -188,6 +142,11 @@ struct alignas(alignof(ctrlchunk_t)) CtrlChunk
         ctrlmask_t const empty_mask = simd<ctrlchunk_t>::movemask_eq(as_simd(), CTRL_EMPTY);
         ctrlmask_t const del_mask = simd<ctrlchunk_t>::movemask_eq(as_simd(), CTRL_DEL);
         return ~(del_mask | empty_mask);
+    }
+
+    inline static ctrlmask_t mask_ctz(ctrlmask_t n)
+    {
+        return unsigned_int<std::numeric_limits<ctrlmask_t>::digits>::ctz(n);
     }
 };
 static_assert(sizeof(CtrlChunk) == sizeof(ctrlchunk_t));
@@ -205,38 +164,7 @@ size_t inline alignup(size_t n, size_t pow2)
 template <typename Key, typename Val> struct HashTbl
 {
     static_assert(is_hashable<Key>::value, "Key must be hashable");
-
     using Self = HashTbl<Key, Val>;
-
-private:
-    /*
-    +-----------+
-    | ctrl      |
-    +-----------+
-    | entries   |
-    +-----------+
-    */
-    uint8_t *buf;
-    size_t max_nr_entries;
-    /** used to calculate load factor */
-    size_t nr_used;
-
-    static const size_t BUF_ALIGNMENT = alignof(ctrlchunk_t);
-
-    char h7(size_t hash)
-    {
-        return (char)(hash & 0b1111111);
-    }
-
-    bool cmp_keys(size_t hash, Key const &key, size_t other_hash, Key const &other_key)
-    {
-        // should just optimize away
-        if (is_trivially_equatable<Key>::value) {
-            return hash == other_hash && key == other_key;
-        } else {
-            return key == other_key;
-        }
-    }
 
 public:
     struct Entry
@@ -367,11 +295,60 @@ public:
         }
     };
 
+private:
+    /*
+    +-----------+
+    | ctrl      |
+    +-----------+
+    | entries   |
+    +-----------+
+    */
+    uint8_t *buf;
+    size_t max_nr_entries;
+    /** used to calculate load factor */
+    size_t nr_used;
+
+    static const size_t BUF_ALIGNMENT = alignof(ctrlchunk_t);
+
+    char h7(size_t hash)
+    {
+        return (char)(hash & 0b1111111);
+    }
+
+    bool cmp_keys(size_t hash, Key const &key, size_t other_hash, Key const &other_key)
+    {
+        // should just optimize away
+        if (is_trivially_equatable<Key>::value) {
+            return hash == other_hash && key == other_key;
+        } else {
+            return key == other_key;
+        }
+    }
+
+    template <int COUNT> void prefetch_entries(Entry *e, ctrlmask_t mask)
+    {
+        for (int i = 0; i < COUNT; ++i) {
+            // We don't want to branch, in the case that mask does not have
+            // `COUNT` high-bits so we just always set the first bit high.
+            mask |= 1 << 31;
+            // if (!mask) break; // Naive could be better, but the above emits
+            //                   // less instructions, so we'll go for that.
+            int offset = __builtin_ctz(mask);
+            __builtin_prefetch(e + offset, 0, 0);
+            mask &= ~(1 << offset);
+        }
+    }
+
+public:
     HashTbl()
         : buf(nullptr)
         , max_nr_entries(0)
         , nr_used(0)
     {
+        PATH_AA = 0;
+        PATH_AB = 0;
+        PATH_B = 0;
+        PATH_C = 0;
     }
 
     static Self with_capacity(size_t capacity)
@@ -493,8 +470,13 @@ public:
     // Use a 0.75 load factor -- should be decent
     bool needs_to_grow() const
     {
-        return nr_used >= max_nr_entries / 8 * 7;
+        return nr_used >= max_nr_entries / 4 * 3;
     }
+
+    uint64_t PATH_AA;
+    uint64_t PATH_AB;
+    uint64_t PATH_B;
+    uint64_t PATH_C;
 
     /**
      * Get the slot where we can insert something with the provided `key`. 
@@ -511,48 +493,65 @@ public:
         CtrlChunk *ctrlchunks = ctrlchunks_buf();
 
         // Just memoize some stuff for readability mostly
-        size_t max_nr_ctrlchunks = max_nr_entries / CtrlChunk::NR_BYTES;
         size_t entry_idx = h % max_nr_entries;
-        uint32_t ctrlchunk_idx = entry_idx / CtrlChunk::NR_BYTES;
-        uint32_t ctrlbyte_offset = entry_idx % CtrlChunk::NR_BYTES;
+        size_t ctrlchunk_idx = entry_idx / CtrlChunk::NR_BYTES;
+        size_t ctrlbyte_offset = entry_idx % CtrlChunk::NR_BYTES;
+        size_t aligned_entry_idx = ctrlchunk_idx * CtrlChunk::NR_BYTES;
 
         CtrlChunk ctrlchunk = *(ctrlchunks + ctrlchunk_idx);
+
         ctrlmask_t keep_mask = std::numeric_limits<ctrlmask_t>::max() << ctrlbyte_offset;
         ctrlmask_t hit_mask = simd<ctrlchunk_t>::movemask_eq(ctrlchunk.as_simd(), h7(h)) &
                               keep_mask;
         ctrlmask_t empty_mask =
             simd<ctrlchunk_t>::movemask_eq(ctrlchunk.as_simd(), CtrlChunk::CTRL_EMPTY) & keep_mask;
+
+        auto empty_mask_tz = CtrlChunk::mask_ctz(empty_mask);
+        auto hit_mask_tz = CtrlChunk::mask_ctz(hit_mask);
         while (true) {
-            // ctz appears to be faster than alternative methods TODO: test
-            if (!hit_mask || (empty_mask && __builtin_ctz(empty_mask) < __builtin_ctz(hit_mask))) {
+            // Path distribution for 8,388,608 (2^23) randint insertions.
+            // We do on average 1.04 loops... so probably best to just consider
+            // the whole thing as one block of code.
+            // PATH_AA = 8427816 = %
+            // PATH_AB = 8126464 = %
+            // PATH_B  = 262144  = %
+            // PATH_C  = 39559   = %
+            if (hit_mask_tz < empty_mask_tz) {
+                PATH_AA++;
+                // We have some kind of hit that we need to check is a complete hit
+                ctrlbyte_offset = hit_mask_tz;
+                size_t i = aligned_entry_idx + ctrlbyte_offset;
+                Entry *entry = entries + i;
+                if (cmp_keys(h, key, entry->hash, entry->key)) {
+                    PATH_AB++;
+                    slot = entry;
+                    ctrl_slot = (char *)ctrlchunks + i;
+                    return false;
+                }
+                hit_mask &= ~((ctrlmask_t)1 << hit_mask_tz);
+                hit_mask_tz = CtrlChunk::mask_ctz(hit_mask);
+            } else if (empty_mask) {
+                PATH_B++;
                 // If we have no matches, but there is an empty slot, we just
                 // put it there
-                if (empty_mask) {
-                    ctrlbyte_offset = __builtin_ctz(empty_mask);
-                    size_t i = ctrlchunk_idx * CtrlChunk::NR_BYTES + ctrlbyte_offset;
-                    slot = entries + i;
-                    ctrl_slot = (char *)ctrlchunks_buf() + i;
-                    return true;
-                }
+                ctrlbyte_offset = empty_mask_tz;
+                size_t i = aligned_entry_idx + ctrlbyte_offset;
+                slot = entries + i;
+                ctrl_slot = (char *)ctrlchunks + i;
+                return true;
+            } else {
+                PATH_C++;
                 // If we have no matches and there is no empty slot, we must
                 // continue probing in subsequent chunks
-                ctrlchunk_idx = (ctrlchunk_idx + 1) % max_nr_ctrlchunks;
+                aligned_entry_idx = (aligned_entry_idx + CtrlChunk::NR_BYTES) % max_nr_entries;
+                ctrlchunk_idx = aligned_entry_idx / CtrlChunk::NR_BYTES;
                 ctrlchunk = ctrlchunks[ctrlchunk_idx];
                 hit_mask = simd<ctrlchunk_t>::movemask_eq(ctrlchunk.as_simd(), h7(h));
                 empty_mask =
                     simd<ctrlchunk_t>::movemask_eq(ctrlchunk.as_simd(), CtrlChunk::CTRL_EMPTY);
-                continue;
+                hit_mask_tz = CtrlChunk::mask_ctz(hit_mask);
+                empty_mask_tz = CtrlChunk::mask_ctz(empty_mask);
             }
-            // We have some kind of hit that we need to check is a complete hit
-            ctrlbyte_offset = __builtin_ctz(hit_mask);
-            size_t i = ctrlchunk_idx * CtrlChunk::NR_BYTES + ctrlbyte_offset;
-            Entry *entry = entries + i;
-            if (cmp_keys(h, key, entry->hash, entry->key)) {
-                slot = entry;
-                ctrl_slot = (char *)ctrlchunks_buf() + i;
-                return false;
-            }
-            hit_mask &= ~((ctrlmask_t)1 << ctrlbyte_offset);
         }
     }
 

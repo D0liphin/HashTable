@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <limits>
 #include <cstring>
+#pragma GCC target("bmi")
+#include <x86intrin.h>
 
 template <size_t NR_BITS> struct unsigned_int
 {
@@ -12,6 +14,18 @@ template <size_t NR_BITS> struct unsigned_int
 template <> struct unsigned_int<16>
 {
     using type = uint16_t;
+
+    /**
+     * Count trailing zeros on this 
+     */
+    __attribute__((target("avx2"))) static inline type ctz(uint16_t n)
+    {
+#ifdef __x86_64__
+        return (uint16_t)_tzcnt_u32(n);
+#else
+        return n ? __builtin_ctz(n) : 16;
+#endif
+    }
 };
 
 template <typename T> struct movemask_t
