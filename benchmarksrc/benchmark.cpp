@@ -61,6 +61,18 @@ template <template <typename, typename> typename Map> struct MapBenchmarks
         }
     }
 
+    static void BM_insert_2update_randoms(benchmark::State &state)
+    {
+        size_t nr_insertions = state.range(0);
+        for (auto _ : state) {
+            Map<size_t, size_t> map;
+            for (size_t i = 0; i < nr_insertions * 3; ++i) {
+                size_t k = MAP_TEST_DATA[i % nr_insertions];
+                IMap<Map, size_t, size_t>::insert(map, k, 0);
+            }
+        }
+    }
+
     static void BM_insert_in_order_xl_vals(benchmark::State &state)
     {
         size_t nr_insertions = state.range(0);
@@ -85,13 +97,20 @@ template <template <typename, typename> typename Map> struct MapBenchmarks
     }
 };
 
-BENCHMARK(MapBenchmarks<default_std_unordered_map_t>::BM_insert_in_order)->Range(8, 8 << 10);
-BENCHMARK(MapBenchmarks<default_std_unordered_map_t>::BM_insert_randoms)->Range(8, 8 << 12);
-// BENCHMARK(MapBenchmarks<default_std_unordered_map_t>::BM_insert_in_order_xl_vals)->Range(8, 8 << 10);
-// BENCHMARK(MapBenchmarks<default_std_unordered_map_t>::BM_insert_randoms_xl_vals)->Range(8, 8 << 12);
-BENCHMARK(MapBenchmarks<HashTbl>::BM_insert_in_order)->Range(8, 8 << 10);
-BENCHMARK(MapBenchmarks<HashTbl>::BM_insert_randoms)->Range(8, 8 << 12);
-// BENCHMARK(MapBenchmarks<HashTbl>::BM_insert_in_order_xl_vals)->Range(8, 8 << 10);
-// BENCHMARK(MapBenchmarks<HashTbl>::BM_insert_randoms_xl_vals)->Range(8, 8 << 12);
+BENCHMARK(MapBenchmarks<default_std_unordered_map_t>::BM_insert_in_order)->Range(8, 8 << 13);
+BENCHMARK(MapBenchmarks<default_std_unordered_map_t>::BM_insert_randoms)->Range(8, 8 << 13);
+BENCHMARK(MapBenchmarks<default_std_unordered_map_t>::BM_insert_2update_randoms)->Range(8, 8 << 13);
+// BENCHMARK(MapBenchmarks<default_std_unordered_map_t>::BM_insert_in_order_xl_vals)->Range(8, 8 << 13);
+// BENCHMARK(MapBenchmarks<default_std_unordered_map_t>::BM_insert_randoms_xl_vals)->Range(8, 8 << 13);
+BENCHMARK(MapBenchmarks<HashTbl>::BM_insert_in_order)->Range(8, 8 << 13);
+BENCHMARK(MapBenchmarks<HashTbl>::BM_insert_randoms)->Range(8, 8 << 13);
+BENCHMARK(MapBenchmarks<HashTbl>::BM_insert_2update_randoms)->Range(8, 8 << 13);
+// BENCHMARK(MapBenchmarks<HashTbl>::BM_insert_in_order_xl_vals)->Range(8, 8 << 13);
+// BENCHMARK(MapBenchmarks<HashTbl>::BM_insert_randoms_xl_vals)->Range(8, 8 << 13);
+BENCHMARK(MapBenchmarks<Table>::BM_insert_in_order)->Range(8, 8 << 13);
+BENCHMARK(MapBenchmarks<Table>::BM_insert_randoms)->Range(8, 8 << 13);
+BENCHMARK(MapBenchmarks<Table>::BM_insert_2update_randoms)->Range(8, 8 << 13);
+// BENCHMARK(MapBenchmarks<Table>::BM_insert_in_order_xl_vals)->Range(8, 8 << 13);
+// BENCHMARK(MapBenchmarks<Table>::BM_insert_randoms_xl_vals)->Range(8, 8 << 13);
 
 BENCHMARK_MAIN();

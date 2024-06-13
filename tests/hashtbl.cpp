@@ -26,7 +26,7 @@ static std::vector<size_t> MAP_TEST_DATA;
 
 void setup_test_data()
 {
-    size_t const sz = 1 << 18;
+    size_t const sz = 1 << 23;
     MAP_TEST_DATA.reserve(sz);
     std::random_device rd;
     std::mt19937_64 gen(rd());
@@ -135,11 +135,11 @@ struct test_suite
                 if (!testcontains) continue;
                 int testv = IMap<TestMap, int, int>::get(testmap, k);
                 int oraclev = IMap<OracleMap, int, int>::get(oraclemap, k);
-                if (testv != oraclev) {
-                    for (auto kv : testmap) {
-                        std::cout << kv.first << " : " << kv.second << std::endl;
-                    }
-                }
+                // if (testv != oraclev) {
+                //     for (auto kv : testmap) {
+                //         std::cout << kv.first << " : " << kv.second << std::endl;
+                //     }
+                // }
                 assert_eq(testv, oraclev);
                 break;
             }
@@ -157,23 +157,24 @@ struct test_suite
         std::cout << std::endl;
     }
 
-    static void test_insert_randoms_doesnt_segfault() {
+    static void test_insert_randoms_doesnt_segfault()
+    {
         size_t nr_insertions = 1 << 23;
         TestMap<size_t, size_t> map;
         for (size_t i = 0; i < nr_insertions; ++i) {
             size_t k = MAP_TEST_DATA[i % MAP_TEST_DATA.size()];
             IMap<TestMap, size_t, size_t>::insert(map, k, 0);
         }
-        std::cout << "PATH_AA = " << map.PATH_AA << std::endl;
-        std::cout << "PATH_AB = " << map.PATH_AB << std::endl;
-        std::cout << "PATH_B = " << map.PATH_B << std::endl;
-        std::cout << "PATH_C = " << map.PATH_C << std::endl;
+        // std::cout << "PATH_AA = " << map.PATH_AA << std::endl;
+        // std::cout << "PATH_AB = " << map.PATH_AB << std::endl;
+        // std::cout << "PATH_B = " << map.PATH_B << std::endl;
+        // std::cout << "PATH_C = " << map.PATH_C << std::endl;
     }
 };
 
 int main()
 {
-    using tests = test_suite<default_std_unordered_map_t, HashTbl>;
+    using tests = test_suite<default_std_unordered_map_t, Table>;
     RUNTEST(tests::test_uint64_inserts_persist);
     RUNTEST(tests::test_uint64_marks_entries_contained);
     RUNTEST(tests::test_int_overrides_old_val);

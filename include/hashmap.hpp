@@ -263,7 +263,7 @@ public:
         Iter &operator++()
         {
             if (!present_mask) return *this; // we reached the end
-            ctrlmask_t keep_mask = ~(1u << (ctrlmask_t)__builtin_ctz(present_mask));
+            ctrlmask_t keep_mask = ~(1u << (ctrlmask_t)CtrlChunk::mask_ctz(present_mask));
             present_mask &= keep_mask;
             find_next_present(); // move cursor to next present
             return *this;
@@ -340,15 +340,25 @@ private:
     }
 
 public:
+#define MEASURE_PATHS 0
+#if MEASURE_PATHS
+    uint64_t PATH_AA;
+    uint64_t PATH_AB;
+    uint64_t PATH_B;
+    uint64_t PATH_C;
+#endif
+
     HashTbl()
         : buf(nullptr)
         , max_nr_entries(0)
         , nr_used(0)
     {
+#if MEASURE_PATHS
         PATH_AA = 0;
         PATH_AB = 0;
         PATH_B = 0;
         PATH_C = 0;
+#endif
     }
 
     static Self with_capacity(size_t capacity)
@@ -473,11 +483,6 @@ public:
         return nr_used >= max_nr_entries / 4 * 3;
     }
 
-    uint64_t PATH_AA;
-    uint64_t PATH_AB;
-    uint64_t PATH_B;
-    uint64_t PATH_C;
-
     /**
      * Get the slot where we can insert something with the provided `key`. 
      * 
@@ -512,18 +517,24 @@ public:
             // Path distribution for 8,388,608 (2^23) randint insertions.
             // We do on average 1.04 loops... so probably best to just consider
             // the whole thing as one block of code.
+            // Bad profiling -- the randints are only like 65k so ofc we will
+            // get lots of hits
             // PATH_AA = 8427816 = %
             // PATH_AB = 8126464 = %
             // PATH_B  = 262144  = %
             // PATH_C  = 39559   = %
             if (hit_mask_tz < empty_mask_tz) {
+#if MEASURE_PATHS
                 PATH_AA++;
+#endif
                 // We have some kind of hit that we need to check is a complete hit
                 ctrlbyte_offset = hit_mask_tz;
                 size_t i = aligned_entry_idx + ctrlbyte_offset;
                 Entry *entry = entries + i;
                 if (cmp_keys(h, key, entry->hash, entry->key)) {
+#if MEASURE_PATHS
                     PATH_AB++;
+#endif
                     slot = entry;
                     ctrl_slot = (char *)ctrlchunks + i;
                     return false;
@@ -531,7 +542,9 @@ public:
                 hit_mask &= ~((ctrlmask_t)1 << hit_mask_tz);
                 hit_mask_tz = CtrlChunk::mask_ctz(hit_mask);
             } else if (empty_mask) {
+#if MEASURE_PATHS
                 PATH_B++;
+#endif
                 // If we have no matches, but there is an empty slot, we just
                 // put it there
                 ctrlbyte_offset = empty_mask_tz;
@@ -540,7 +553,9 @@ public:
                 ctrl_slot = (char *)ctrlchunks + i;
                 return true;
             } else {
+#if MEASURE_PATHS
                 PATH_C++;
+#endif
                 // If we have no matches and there is no empty slot, we must
                 // continue probing in subsequent chunks
                 aligned_entry_idx = (aligned_entry_idx + CtrlChunk::NR_BYTES) % max_nr_entries;

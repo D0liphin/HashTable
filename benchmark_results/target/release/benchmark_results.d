@@ -1,0 +1,1 @@
+/home/oli/Documents/Coding/CPP/MiniProjects/hashmap/benchmark_results/target/release/benchmark_results: /home/oli/Documents/Coding/CPP/MiniProjects/hashmap/benchmark_results/c.json /home/oli/Documents/Coding/CPP/MiniProjects/hashmap/benchmark_results/src/main.rs

@@ -16,7 +16,8 @@ template <> struct unsigned_int<16>
     using type = uint16_t;
 
     /**
-     * Count trailing zeros on this 
+     * Count trailing zeros on this u16. If the u16 is 0 the result is 
+     * an indeterminate value in the range `16..`
      */
     __attribute__((target("avx2"))) static inline type ctz(uint16_t n)
     {

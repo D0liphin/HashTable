@@ -1,11 +1,12 @@
 #pragma once
 
+#include <hashmap.hpp>
 #include <string>
 #include <unordered_map>
 #include <random>
 #include <vector>
 #include <stdexcept>
-#include <hashmap.hpp>
+#include <table.h>
 
 /**
  * It is also assumed that `Map` provides a `std::pair` iterator.
@@ -15,7 +16,8 @@ template <template <typename, typename> typename Map, typename K, typename V> st
     static constexpr bool implements = false;
 
     /**
-     * Insert a (key, value) pair into the map
+     * Insert a (key, value) pair into the map, or update the value at the
+     * specified key
      */
     static void insert(Map<K, V> &, K, V)
     {
@@ -123,30 +125,48 @@ template <typename K, typename V> struct IMap<HashTbl, K, V>
     }
 };
 
-/*
-template <typename K, typename V> struct IMap<std::unordered_map<K, V>, K, V>
+template <typename K, typename V> struct Table
 {
-    using Map = std::unordered_map<K, V>;
+    Table()
+    {
+        table_init(&inner, 0);
+    }
+
+    ~Table() 
+    {
+        table_free(&inner);
+    }
+
+    table inner;
+};
+
+template <typename K, typename V> struct IMap<Table, K, V>
+{
+    using Map = Table<K, V>;
     static constexpr bool implements = true;
 
     static void insert(Map &map, K k, V v)
     {
+        table_insert(&map.inner, (_key_t)k, (val_t)v);
     }
 
-    static bool contains(Map const &map, K const &k)
+    static bool contains(Map &map, K const &k)
     {
+        return table_get(&map.inner, (_key_t const &)k) != nullptr;
+    }
+
+    static V &get(Map &map, K const &k)
+    {
+        return (V &)*table_get(&map.inner, (_key_t const &)k);
     }
 
     static void remove(Map &map, K const &k)
     {
+        table_remove(&map.inner, (_key_t const &)k);
     }
 
     static void clear(Map &map)
     {
-    }
-
-    static auto iter(Map &map) -> decltype(Map::begin())
-    {
+        throw std::runtime_error("nyi");
     }
 };
-*/
