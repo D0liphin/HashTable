@@ -1,7 +1,9 @@
 target/src/main.cpp.o: src/main.cpp include/ihashmap.hpp \
- include/hashmap.hpp include/buf.hpp include/simd.hpp include/table.h
+ include/hashmap.hpp include/buf.hpp include/simd.hpp include/table.h \
+ include/chaintable.h
 include/ihashmap.hpp:
 include/hashmap.hpp:
 include/buf.hpp:
 include/simd.hpp:
 include/table.h:
+include/chaintable.h:

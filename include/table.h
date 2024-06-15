@@ -62,12 +62,17 @@ int table_init(table *tbl, const size_t capacity)
     return 0;
 }
 
+double total_probes = 0;
+double total_calls_table_get_slot = 0;
+
 struct entry *table_get_slot(table *tbl, _key_t k)
 {
     size_t h = hash(k);
     for (size_t i = h % tbl->capacity; true; i = (i + 1) % tbl->capacity) {
+        total_probes++;
         struct entry *e = &tbl->buf[i];
         if (e->meta == _CTRL_EMPTY) {
+            total_calls_table_get_slot++;
             return e;
         } else if (e->meta == _CTRL_DEL) {
             continue;
@@ -77,10 +82,12 @@ struct entry *table_get_slot(table *tbl, _key_t k)
     }
 }
 
+double L = 0.75;
+
 int table_insert(table *tbl, _key_t k, val_t v)
 {
-    if (tbl->capacity == 0 || tbl->nr_occupied >= tbl->capacity / 4 * 3) {
-        int err = table_realloc(tbl, tbl->capacity ? tbl->capacity * 2 : 8);
+    if (tbl->capacity == 0 || (double)tbl->nr_occupied >= (double)tbl->capacity * L) {
+        int err = table_realloc(tbl, tbl->capacity ? tbl->capacity * 4 : 8);
         if (err) {
             return err;
         }

@@ -78,3 +78,4 @@ I'm pretty confident this works in its current state. I just test it
 against a bunch of random values and perform the same operations on
 `std::unordered_map`. No flags for undefined-behaviour even after 
 100,000,000 operations.
+

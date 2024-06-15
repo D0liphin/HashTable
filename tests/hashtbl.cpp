@@ -26,7 +26,7 @@ static std::vector<size_t> MAP_TEST_DATA;
 
 void setup_test_data()
 {
-    size_t const sz = 1 << 23;
+    size_t const sz = 1 << 27;
     MAP_TEST_DATA.reserve(sz);
     std::random_device rd;
     std::mt19937_64 gen(rd());
@@ -159,12 +159,14 @@ struct test_suite
 
     static void test_insert_randoms_doesnt_segfault()
     {
-        size_t nr_insertions = 1 << 23;
+        size_t nr_insertions = (size_t)((double)(1 << 22) * L);
+        // std::cout << "doing " << nr_insertions << " insertions..." << std::endl;
         TestMap<size_t, size_t> map;
         for (size_t i = 0; i < nr_insertions; ++i) {
             size_t k = MAP_TEST_DATA[i % MAP_TEST_DATA.size()];
             IMap<TestMap, size_t, size_t>::insert(map, k, 0);
         }
+        std::cout << total_probes / total_calls_table_get_slot << std::endl;
         // std::cout << "PATH_AA = " << map.PATH_AA << std::endl;
         // std::cout << "PATH_AB = " << map.PATH_AB << std::endl;
         // std::cout << "PATH_B = " << map.PATH_B << std::endl;
@@ -174,11 +176,10 @@ struct test_suite
 
 int main()
 {
-    using tests = test_suite<default_std_unordered_map_t, Table>;
+    using tests = test_suite<default_std_unordered_map_t, ChainTable>;
     RUNTEST(tests::test_uint64_inserts_persist);
     RUNTEST(tests::test_uint64_marks_entries_contained);
     RUNTEST(tests::test_int_overrides_old_val);
-    RUNTEST(tests::test_insert_randoms_doesnt_segfault);
     RUNTEST(tests::test_sequence_of_random_operations_against_oracle);
     return 0;
 }

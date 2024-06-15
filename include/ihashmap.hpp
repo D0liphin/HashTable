@@ -7,6 +7,7 @@
 #include <vector>
 #include <stdexcept>
 #include <table.h>
+#include <chaintable.h>
 
 /**
  * It is also assumed that `Map` provides a `std::pair` iterator.
@@ -163,6 +164,52 @@ template <typename K, typename V> struct IMap<Table, K, V>
     static void remove(Map &map, K const &k)
     {
         table_remove(&map.inner, (_key_t const &)k);
+    }
+
+    static void clear(Map &map)
+    {
+        throw std::runtime_error("nyi");
+    }
+};
+
+template <typename K, typename V> struct ChainTable
+{
+    ChainTable()
+    {
+        chaintable_init(&inner, 0, 0.75);
+    }
+
+    ~ChainTable() 
+    {
+        chaintable_free(&inner);
+    }
+
+    chaintable inner;
+};
+
+template <typename K, typename V> struct IMap<ChainTable, K, V>
+{
+    using Map = ChainTable<K, V>;
+    static constexpr bool implements = true;
+
+    static void insert(Map &map, K k, V v)
+    {
+        chaintable_insert(&map.inner, (chaink_t)k, (chainv_t)v);
+    }
+
+    static bool contains(Map &map, K const &k)
+    {
+        return chaintable_get(&map.inner, (chaink_t const &)k) != nullptr;
+    }
+
+    static V &get(Map &map, K const &k)
+    {
+        return (V &)*chaintable_get(&map.inner, (chaink_t const &)k);
+    }
+
+    static void remove(Map &map, K const &k)
+    {
+        chaintable_remove(&map.inner, (chaink_t const &)k);
     }
 
     static void clear(Map &map)
